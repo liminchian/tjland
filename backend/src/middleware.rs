@@ -3,12 +3,11 @@ use std::sync::Arc;
 
 use rocket::{
     fairing::{Fairing, Info, Kind, Result},
-    serde::{Deserialize, Serialize},
     Build, Rocket,
 };
+use serde::{Deserialize, Serialize};
 use surrealdb::{
     engine::remote::ws::{Client, Ws},
-    opt::auth::Root,
     sql::Thing,
     Surreal,
 };
@@ -63,8 +62,17 @@ impl UserTable for DbInstance {
         &self,
         name: String,
         email: String,
+        password: String,
     ) -> Result<Record, crate::error::Error> {
-        Ok(self.0.create("user").content(User { name, email }).await?)
+        Ok(self
+            .0
+            .create("user")
+            .content(User {
+                name,
+                email,
+                password,
+            })
+            .await?)
     }
 
     async fn delete_user(&self, id: String) -> Result<AffectedRows, crate::error::Error> {

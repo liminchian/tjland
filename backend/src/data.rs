@@ -1,9 +1,6 @@
 use chrono::TimeZone;
-use rocket::{
-    form::FromFormField,
-    serde::{Deserialize, Serialize},
-    FromForm,
-};
+use rocket::{form::FromFormField, FromForm};
+use serde::{Deserialize, Serialize};
 
 use crate::middleware::{AffectedRows, Record};
 
@@ -25,12 +22,17 @@ impl<'r> FromFormField<'r> for UtcDateTime {
 pub struct User {
     pub name: String,
     pub email: String,
+    pub password: String,
 }
 
 #[rocket::async_trait]
 pub trait UserTable {
-    async fn create_user(&self, name: String, email: String)
-        -> Result<Record, crate::error::Error>;
+    async fn create_user(
+        &self,
+        name: String,
+        email: String,
+        password: String,
+    ) -> Result<Record, crate::error::Error>;
     async fn delete_user(&self, id: String) -> Result<AffectedRows, crate::error::Error>;
     async fn update_user(
         &self,

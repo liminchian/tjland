@@ -115,9 +115,11 @@ async fn create_user(
     db: &State<DbInstance>,
 ) -> Result<Json<Record>, std::io::Error> {
     let obj = user.into_inner();
-    Ok(Json(db.create_user(obj.name, obj.email).await.map_err(
-        |_| std::io::Error::new(ErrorKind::Other, "Unable create user."),
-    )?))
+    Ok(Json(
+        db.create_user(obj.name, obj.email, obj.password)
+            .await
+            .map_err(|_| std::io::Error::new(ErrorKind::Other, "Unable create user."))?,
+    ))
 }
 
 #[get("/<user_id>")]
