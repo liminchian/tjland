@@ -1,6 +1,9 @@
 use chrono::TimeZone;
-use rocket::{form::FromFormField, FromForm};
-use serde::{Deserialize, Serialize};
+use rocket::{
+    form::FromFormField,
+    serde::{Deserialize, Serialize},
+    FromForm,
+};
 
 use crate::middleware::{AffectedRows, Record};
 

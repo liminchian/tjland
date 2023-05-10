@@ -3,11 +3,12 @@ use std::sync::Arc;
 
 use rocket::{
     fairing::{Fairing, Info, Kind, Result},
+    serde::{Deserialize, Serialize},
     Build, Rocket,
 };
-use serde::{Deserialize, Serialize};
 use surrealdb::{
     engine::remote::ws::{Client, Ws},
+    opt::auth::Root,
     sql::Thing,
     Surreal,
 };
@@ -52,6 +53,11 @@ impl DbInstance {
     ) -> Result<DbInstance, crate::error::Error> {
         let db = Surreal::new::<Ws>("127.0.0.1:24131").await?;
         db.use_ns(&namespace).use_db(&database).await?;
+        db.signin(Root {
+            username: "root",
+            password: "root",
+        })
+        .await?;
         Ok(DbInstance(Arc::new(db)))
     }
 }

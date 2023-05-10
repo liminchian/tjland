@@ -114,9 +114,9 @@ async fn create_user(
     user: Json<User>,
     db: &State<DbInstance>,
 ) -> Result<Json<Record>, std::io::Error> {
-    let obj = user.into_inner();
+    let data = user.into_inner();
     Ok(Json(
-        db.create_user(obj.name, obj.email, obj.password)
+        db.create_user(data.name, data.email, data.password)
             .await
             .map_err(|_| std::io::Error::new(ErrorKind::Other, "Unable create user."))?,
     ))
@@ -176,4 +176,50 @@ async fn rocket() -> _ {
         )
         .attach(CORS)
         .attach(DbMiddleware)
+}
+
+#[cfg(test)]
+mod test {
+    use super::data::User;
+    use super::rocket;
+    use async_once::AsyncOnce;
+    use lazy_static::lazy_static;
+    use rocket::http::Status;
+    use rocket::local::asynchronous::Client;
+
+    lazy_static! {
+        static ref CLIENT: AsyncOnce<Client> = AsyncOnce::new(async {
+            Client::tracked(rocket().await)
+                .await
+                .expect("valid rocket instance")
+        });
+    }
+
+    #[rocket::async_test]
+    async fn test_create_user() {
+        let user = User {
+            name: "test".to_string(),
+            email: "abc@gmail.com".to_string(),
+            password: "123".to_string(),
+        };
+        let response = CLIENT
+            .get()
+            .await
+            .post(uri!("/user/"))
+            .json(&user)
+            .dispatch()
+            .await;
+        assert_eq!(response.status(), Status::Ok);
+    }
+
+    #[rocket::async_test]
+    async fn test_get_user() {
+        let response = CLIENT
+            .get()
+            .await
+            .get(uri!("/user/user:zv8cfwnz35972pq67dp9"))
+            .dispatch()
+            .await;
+        assert_eq!(response.status(), Status::Ok);
+    }
 }
