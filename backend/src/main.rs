@@ -60,7 +60,12 @@ async fn complete_booking(
     booking_id: String,
     db: &State<DbInstance>,
 ) -> Result<Json<AffectedRows>, std::io::Error> {
-    let booking = db.search_booking(booking_id.clone()).await.unwrap();
+    let booking = db.search_booking(booking_id.clone()).await.map_err(|_| {
+        std::io::Error::new(
+            ErrorKind::Other,
+            format!("Unable get booking: {}", &booking_id),
+        )
+    })?;
     Ok(Json(
         db.update_booking(
             booking_id,
@@ -82,7 +87,12 @@ async fn notify(
     booking_id: String,
     db: &State<DbInstance>,
 ) -> Result<Json<AffectedRows>, std::io::Error> {
-    let booking = db.search_booking(booking_id.clone()).await.unwrap();
+    let booking = db.search_booking(booking_id.clone()).await.map_err(|_| {
+        std::io::Error::new(
+            ErrorKind::Other,
+            format!("Unable get booking: {}", &booking_id),
+        )
+    })?;
     Ok(Json(
         db.update_booking(
             booking_id,
@@ -196,6 +206,7 @@ mod test {
     }
 
     #[rocket::async_test]
+    #[ignore = "sample object already exist."]
     async fn test_create_user() {
         let user = User {
             name: "test".to_string(),
@@ -217,7 +228,24 @@ mod test {
         let response = CLIENT
             .get()
             .await
-            .get(uri!("/user/user:zv8cfwnz35972pq67dp9"))
+            .get(uri!("/user/lchfpn7xvr08fyuuwk63"))
+            .dispatch()
+            .await;
+        assert_eq!(response.status(), Status::Ok);
+    }
+
+    #[rocket::async_test]
+    async fn test_update_user() {
+        let user = User {
+            name: "new".to_string(),
+            email: "aab@gmail.com".to_string(),
+            password: "123".to_string(),
+        };
+        let response = CLIENT
+            .get()
+            .await
+            .post(uri!("/user/lchfpn7xvr08fyuuwk63"))
+            .json(&user)
             .dispatch()
             .await;
         assert_eq!(response.status(), Status::Ok);
