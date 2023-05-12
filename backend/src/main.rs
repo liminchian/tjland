@@ -139,12 +139,12 @@ async fn get_user(user_id: String, db: &State<DbInstance>) -> Result<Json<User>,
     })?))
 }
 
-#[post("/<user_id>", data = "<user>")]
+#[patch("/<user_id>", data = "<user>")]
 async fn update_user(
     user_id: String,
     user: Json<User>,
     db: &State<DbInstance>,
-) -> Result<Json<AffectedRows>, std::io::Error> {
+) -> Result<Json<User>, std::io::Error> {
     Ok(Json(
         db.update_user(user_id, user.into_inner())
             .await
@@ -152,6 +152,8 @@ async fn update_user(
     ))
 }
 
+// FIXME: 刪除user同時，會一併刪除user_id對應的booking項目。
+// 但當booking表尚未建立時，會產生錯誤。
 #[delete("/<user_id>")]
 async fn delete_user(
     user_id: String,
@@ -191,7 +193,12 @@ async fn rocket() -> _ {
 #[cfg(test)]
 mod test {
     use super::data::User;
+    use super::middleware::{AffectedRows, Record};
     use super::rocket;
+
+    use super::{
+        rocket_uri_macro_delete_user, rocket_uri_macro_get_user, rocket_uri_macro_update_user,
+    };
     use async_once::AsyncOnce;
     use lazy_static::lazy_static;
     use rocket::http::Status;
@@ -206,14 +213,14 @@ mod test {
     }
 
     #[rocket::async_test]
-    #[ignore = "sample object already exist."]
-    async fn test_create_user() {
-        let user = User {
+    async fn test_user_lifecycle() {
+        // create_user
+        let mut user = User {
             name: "test".to_string(),
             email: "abc@gmail.com".to_string(),
             password: "123".to_string(),
         };
-        let response = CLIENT
+        let mut response = CLIENT
             .get()
             .await
             .post(uri!("/user/"))
@@ -221,33 +228,44 @@ mod test {
             .dispatch()
             .await;
         assert_eq!(response.status(), Status::Ok);
-    }
+        let id = response.into_json::<Record>().await.unwrap().id.to_string();
 
-    #[rocket::async_test]
-    async fn test_get_user() {
-        let response = CLIENT
-            .get()
-            .await
-            .get(uri!("/user/lchfpn7xvr08fyuuwk63"))
-            .dispatch()
-            .await;
+        // get_user
+        response = CLIENT.get().await.get(uri!(get_user(&id))).dispatch().await;
         assert_eq!(response.status(), Status::Ok);
-    }
+        let mut result = response.into_json::<User>().await.unwrap();
+        assert_eq!(result.name, user.name);
+        assert_eq!(result.email, user.email);
+        assert_eq!(result.password, user.password);
 
-    #[rocket::async_test]
-    async fn test_update_user() {
-        let user = User {
-            name: "new".to_string(),
-            email: "aab@gmail.com".to_string(),
-            password: "123".to_string(),
-        };
-        let response = CLIENT
+        // update_user
+        user.name = "West".to_string();
+        response = CLIENT
             .get()
             .await
-            .post(uri!("/user/lchfpn7xvr08fyuuwk63"))
+            .patch(uri!(update_user(&id)))
             .json(&user)
             .dispatch()
             .await;
         assert_eq!(response.status(), Status::Ok);
+        result = response.into_json::<User>().await.unwrap();
+        assert_eq!(result.name, "West");
+
+        // delete_user
+        response = CLIENT
+            .get()
+            .await
+            .delete(uri!(delete_user(&id)))
+            .dispatch()
+            .await;
+        assert_eq!(response.status(), Status::Ok);
+        assert_eq!(
+            response
+                .into_json::<AffectedRows>()
+                .await
+                .unwrap()
+                .rows_affected,
+            1
+        );
     }
 }
