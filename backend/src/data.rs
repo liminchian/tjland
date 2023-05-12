@@ -37,7 +37,11 @@ pub trait UserTable {
         password: String,
     ) -> Result<Record, crate::error::Error>;
     async fn delete_user(&self, id: String) -> Result<AffectedRows, crate::error::Error>;
-    async fn update_user(&self, id: String, user: User) -> Result<User, crate::error::Error>;
+    async fn update_user(
+        &self,
+        id: String,
+        user: User,
+    ) -> Result<AffectedRows, crate::error::Error>;
     async fn search_user(&self, id: String) -> Result<User, crate::error::Error>;
 }
 

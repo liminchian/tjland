@@ -95,8 +95,13 @@ impl UserTable for DbInstance {
         })
     }
 
-    async fn update_user(&self, id: String, user: User) -> Result<User, crate::error::Error> {
-        Ok(self.0.update(("user", id.as_str())).content(user).await?)
+    async fn update_user(
+        &self,
+        id: String,
+        user: User,
+    ) -> Result<AffectedRows, crate::error::Error> {
+        let _: Record = self.0.update(("user", id.as_str())).content(user).await?;
+        Ok(AffectedRows { rows_affected: 1 })
     }
 
     async fn search_user(&self, id: String) -> Result<User, crate::error::Error> {
