@@ -8,7 +8,7 @@ use rocket::{
 use crate::middleware::{AffectedRows, Record};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct UtcDateTime(chrono::DateTime<chrono::Utc>);
+pub struct UtcDateTime(pub chrono::DateTime<chrono::Utc>);
 
 impl<'r> FromFormField<'r> for UtcDateTime {
     fn from_value(field: rocket::form::ValueField<'r>) -> rocket::form::Result<'r, UtcDateTime> {

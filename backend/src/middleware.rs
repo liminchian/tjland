@@ -1,6 +1,4 @@
 // from: https://www.workfall.com/learning/blog/use-surrealdb-to-persist-data-with-rocket-rest-api/
-use std::sync::Arc;
-
 use rocket::{
     fairing::{Fairing, Info, Kind, Result},
     serde::{Deserialize, Serialize},
@@ -33,6 +31,17 @@ impl Fairing for DbMiddleware {
             .await
             .unwrap();
 
+        db.0.query(
+            r#"CREATE booking SET
+        subject='first',
+        user_id='first',
+        booking_at=time::now(),
+        completed=true,
+        notified=ture"#,
+        )
+        .await
+        .unwrap();
+
         Ok(rocket.manage(db))
     }
 }
@@ -44,7 +53,7 @@ struct DbConfig {
     database: String,
 }
 
-pub struct DbInstance(Arc<Surreal<Client>>);
+pub struct DbInstance(Surreal<Client>);
 
 impl DbInstance {
     pub async fn new(
@@ -58,7 +67,8 @@ impl DbInstance {
             password: "root",
         })
         .await?;
-        Ok(DbInstance(Arc::new(db)))
+
+        Ok(DbInstance(db))
     }
 }
 
@@ -155,7 +165,7 @@ impl BookingTable for DbInstance {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Record {
     #[allow(dead_code)]
     pub id: Thing,

@@ -223,12 +223,14 @@ mod test {
         let mut response = CLIENT
             .get()
             .await
-            .post(uri!("/user/"))
+            .post(uri!("/user"))
             .json(&user)
             .dispatch()
             .await;
         assert_eq!(response.status(), Status::Ok);
-        let id = response.into_json::<Record>().await.unwrap().id.to_string();
+        let record = response.into_json::<Record>().await.unwrap(); // FIXME:
+                                                                    // 沒有對應的回傳值
+        let id = record.id.to_string();
 
         // get_user
         response = CLIENT.get().await.get(uri!(get_user(&id))).dispatch().await;
