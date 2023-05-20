@@ -14,7 +14,7 @@ use rocket::{
 };
 
 use crate::data::{Booking, User};
-use crate::middleware::{AffectedRows, DbInstance, DbMiddleware, Record};
+use crate::middleware::{AffectedRows, DbInstance, DbMiddleware};
 use cors::*;
 
 mod cors;
@@ -36,7 +36,7 @@ async fn create_booking(
     user_id: String,
     booking: Json<Booking>,
     db: &State<DbInstance>,
-) -> Result<Json<Record>, std::io::Error> {
+) -> Result<Json<String>, std::io::Error> {
     let obj = booking.into_inner();
     Ok(Json(
         db.create_booking(obj.subject, obj.booking_at, user_id)
@@ -59,7 +59,7 @@ async fn get_booking(
 async fn complete_booking(
     booking_id: String,
     db: &State<DbInstance>,
-) -> Result<Json<AffectedRows>, std::io::Error> {
+) -> Result<Json<Booking>, std::io::Error> {
     let booking = db.search_booking(booking_id.clone()).await.map_err(|_| {
         std::io::Error::new(
             ErrorKind::Other,
@@ -86,7 +86,7 @@ async fn complete_booking(
 async fn notify(
     booking_id: String,
     db: &State<DbInstance>,
-) -> Result<Json<AffectedRows>, std::io::Error> {
+) -> Result<Json<Booking>, std::io::Error> {
     let booking = db.search_booking(booking_id.clone()).await.map_err(|_| {
         std::io::Error::new(
             ErrorKind::Other,
@@ -123,7 +123,7 @@ async fn cancel_booking(
 async fn create_user(
     user: Json<User>,
     db: &State<DbInstance>,
-) -> Result<Json<Record>, std::io::Error> {
+) -> Result<Json<String>, std::io::Error> {
     let data = user.into_inner();
     Ok(Json(
         db.create_user(data.name, data.email, data.password)
@@ -152,8 +152,6 @@ async fn update_user(
     ))
 }
 
-// FIXME: 刪除user同時，會一併刪除user_id對應的booking項目。
-// 但當booking表尚未建立時，會產生錯誤。
 #[delete("/<user_id>")]
 async fn delete_user(
     user_id: String,
@@ -193,11 +191,12 @@ async fn rocket() -> _ {
 #[cfg(test)]
 mod test {
     use super::data::User;
-    use super::middleware::{AffectedRows, Record};
+    use super::middleware::AffectedRows;
     use super::rocket;
 
     use super::{
-        rocket_uri_macro_delete_user, rocket_uri_macro_get_user, rocket_uri_macro_update_user,
+        rocket_uri_macro_create_user, rocket_uri_macro_delete_user, rocket_uri_macro_get_user,
+        rocket_uri_macro_update_user,
     };
     use async_once::AsyncOnce;
     use lazy_static::lazy_static;
@@ -223,17 +222,21 @@ mod test {
         let mut response = CLIENT
             .get()
             .await
-            .post(uri!("/user"))
+            .post(uri!("/user", create_user()))
             .json(&user)
             .dispatch()
             .await;
         assert_eq!(response.status(), Status::Ok);
-        let record = response.into_json::<Record>().await.unwrap(); // FIXME:
-                                                                    // 沒有對應的回傳值
-        let id = record.id.to_string();
+        let id = response.into_string().await.unwrap().replace("\"", "");
+        println!("user_id: {}", &id);
 
         // get_user
-        response = CLIENT.get().await.get(uri!(get_user(&id))).dispatch().await;
+        response = CLIENT
+            .get()
+            .await
+            .get(uri!("/user", get_user(&id.to_string())))
+            .dispatch()
+            .await;
         assert_eq!(response.status(), Status::Ok);
         let mut result = response.into_json::<User>().await.unwrap();
         assert_eq!(result.name, user.name);
@@ -245,7 +248,7 @@ mod test {
         response = CLIENT
             .get()
             .await
-            .patch(uri!(update_user(&id)))
+            .patch(uri!("/user", update_user(&id.to_string())))
             .json(&user)
             .dispatch()
             .await;
@@ -257,7 +260,7 @@ mod test {
         response = CLIENT
             .get()
             .await
-            .delete(uri!(delete_user(&id)))
+            .delete(uri!("/user", delete_user(&id.to_string())))
             .dispatch()
             .await;
         assert_eq!(response.status(), Status::Ok);

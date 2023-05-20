@@ -1,11 +1,8 @@
 use chrono::TimeZone;
-use rocket::{
-    form::FromFormField,
-    serde::{Deserialize, Serialize},
-    FromForm,
-};
+use rocket::{form::FromFormField, FromForm};
+use serde::{Deserialize, Serialize};
 
-use crate::middleware::{AffectedRows, Record};
+use crate::middleware::AffectedRows;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UtcDateTime(pub chrono::DateTime<chrono::Utc>);
@@ -35,7 +32,7 @@ pub trait UserTable {
         name: String,
         email: String,
         password: String,
-    ) -> Result<Record, crate::error::Error>;
+    ) -> Result<String, crate::error::Error>;
     async fn delete_user(&self, id: String) -> Result<AffectedRows, crate::error::Error>;
     async fn update_user(&self, id: String, user: User) -> Result<User, crate::error::Error>;
     async fn search_user(&self, id: String) -> Result<User, crate::error::Error>;
@@ -58,13 +55,13 @@ pub trait BookingTable {
         subject: String,
         booking_at: UtcDateTime,
         user_id: String,
-    ) -> Result<Record, crate::error::Error>;
+    ) -> Result<String, crate::error::Error>;
     async fn delete_booking(&self, id: String) -> Result<AffectedRows, crate::error::Error>;
     async fn update_booking(
         &self,
         id: String,
         booking: Booking,
-    ) -> Result<AffectedRows, crate::error::Error>;
+    ) -> Result<Booking, crate::error::Error>;
     async fn search_booking(&self, id: String) -> Result<Booking, crate::error::Error>;
     async fn search_all_bookings(&self) -> Result<Vec<Booking>, crate::error::Error>;
 }

@@ -1,9 +1,11 @@
 // from: https://www.workfall.com/learning/blog/use-surrealdb-to-persist-data-with-rocket-rest-api/
+use std::sync::Arc;
+
 use rocket::{
     fairing::{Fairing, Info, Kind, Result},
-    serde::{Deserialize, Serialize},
     Build, Rocket,
 };
+use serde::{Deserialize, Serialize};
 use surrealdb::{
     engine::remote::ws::{Client, Ws},
     opt::auth::Root,
@@ -31,16 +33,7 @@ impl Fairing for DbMiddleware {
             .await
             .unwrap();
 
-        db.0.query(
-            r#"CREATE booking SET
-        subject='first',
-        user_id='first',
-        booking_at=time::now(),
-        completed=true,
-        notified=ture"#,
-        )
-        .await
-        .unwrap();
+        db.init_table().await.unwrap();
 
         Ok(rocket.manage(db))
     }
@@ -53,7 +46,7 @@ struct DbConfig {
     database: String,
 }
 
-pub struct DbInstance(Surreal<Client>);
+pub struct DbInstance(Arc<Surreal<Client>>);
 
 impl DbInstance {
     pub async fn new(
@@ -68,7 +61,13 @@ impl DbInstance {
         })
         .await?;
 
-        Ok(DbInstance(db))
+        Ok(DbInstance(Arc::new(db)))
+    }
+
+    pub async fn init_table(&self) -> Result<(), crate::error::Error> {
+        self.0.query("DEFINE TABLE booking;").await?;
+        self.0.query("DEFINE TABLE user;").await?;
+        Ok(())
     }
 }
 
@@ -79,8 +78,8 @@ impl UserTable for DbInstance {
         name: String,
         email: String,
         password: String,
-    ) -> Result<Record, crate::error::Error> {
-        Ok(self
+    ) -> Result<String, crate::error::Error> {
+        let record: Record = self
             .0
             .create("user")
             .content(User {
@@ -88,20 +87,22 @@ impl UserTable for DbInstance {
                 email,
                 password,
             })
-            .await?)
+            .await?;
+        let id = record.id.id.to_string();
+
+        Ok(id)
     }
 
     async fn delete_user(&self, id: String) -> Result<AffectedRows, crate::error::Error> {
-        let _: Record = self.0.delete(("user", id.as_str())).await?;
-        let deleted: Vec<String> = self
+        let _: User = self.0.delete(("user", id.as_str())).await?;
+        let deleted = self
             .0
-            .query("DELETE booking WHERE user_id = $id")
-            .bind(id)
+            .query("DELETE booking WHERE user_id = $user_id RETURN BEFORE;")
+            .bind(("user_id", id))
             .await?
-            .take("id")?;
-
+            .take::<Vec<Booking>>(0)?;
         Ok(AffectedRows {
-            rows_affected: deleted.len() as u64,
+            rows_affected: 1 + deleted.len(),
         })
     }
 
@@ -121,8 +122,8 @@ impl BookingTable for DbInstance {
         subject: String,
         booking_at: UtcDateTime,
         user_id: String,
-    ) -> Result<Record, crate::error::Error> {
-        Ok(self
+    ) -> Result<String, crate::error::Error> {
+        let record: Record = self
             .0
             .create("booking")
             .content(Booking {
@@ -132,12 +133,14 @@ impl BookingTable for DbInstance {
                 completed: false,
                 notified: false,
             })
-            .await?)
+            .await?;
+        let id = record.id.id.to_string();
+
+        Ok(id)
     }
 
     async fn delete_booking(&self, id: String) -> Result<AffectedRows, crate::error::Error> {
-        let deleted: Booking = self.0.delete(("booking", id.as_str())).await?;
-        dbg!(deleted);
+        let _ = self.0.delete(("booking", id.as_str())).await?;
         Ok(AffectedRows { rows_affected: 1 })
     }
 
@@ -145,14 +148,13 @@ impl BookingTable for DbInstance {
         &self,
         id: String,
         booking: Booking,
-    ) -> Result<AffectedRows, crate::error::Error> {
+    ) -> Result<Booking, crate::error::Error> {
         let updated: Booking = self
             .0
             .update(("booking", id.as_str()))
             .content(booking)
             .await?;
-        dbg!(updated);
-        Ok(AffectedRows { rows_affected: 1 })
+        Ok(updated)
     }
 
     async fn search_booking(&self, id: String) -> Result<Booking, crate::error::Error> {
@@ -166,12 +168,11 @@ impl BookingTable for DbInstance {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Record {
-    #[allow(dead_code)]
-    pub id: Thing,
+struct Record {
+    id: Thing,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AffectedRows {
-    pub rows_affected: u64,
+    pub rows_affected: usize,
 }
