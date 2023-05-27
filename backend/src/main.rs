@@ -3,7 +3,6 @@ extern crate rocket;
 
 use std::io::ErrorKind;
 
-use data::{BookingTable, UserTable};
 use rocket::{
     figment::{
         providers::{Format, Toml},
@@ -13,7 +12,7 @@ use rocket::{
     {serde::json::Json, State},
 };
 
-use crate::data::{Booking, User};
+use crate::data::{Booking, BookingTable, CheckItem, User, UserTable};
 use crate::middleware::{AffectedRows, DbInstance, DbMiddleware};
 use cors::*;
 
@@ -22,6 +21,8 @@ mod data;
 mod error;
 mod middleware;
 mod prelude;
+#[cfg(test)]
+mod tests;
 mod utils;
 
 #[get("/booking")]
@@ -31,15 +32,14 @@ async fn get_all_bookings(db: &State<DbInstance>) -> Result<Json<Vec<Booking>>, 
     })?))
 }
 
-#[post("/<user_id>", data = "<booking>")]
+#[post("/", data = "<booking>")]
 async fn create_booking(
-    user_id: String,
     booking: Json<Booking>,
     db: &State<DbInstance>,
 ) -> Result<Json<String>, std::io::Error> {
     let obj = booking.into_inner();
     Ok(Json(
-        db.create_booking(obj.subject, obj.booking_at, user_id)
+        db.create_booking(obj.content, obj.booking_at, obj.user_id)
             .await
             .map_err(|_| std::io::Error::new(ErrorKind::Other, "Unable create booking."))?,
     ))
@@ -55,30 +55,30 @@ async fn get_booking(
     })?))
 }
 
+#[put("/<booking_id>", data = "<item>")]
+async fn update_booking(
+    booking_id: String,
+    item: Json<Booking>,
+    db: &State<DbInstance>,
+) -> Result<Json<Booking>, std::io::Error> {
+    Ok(Json(
+        db.update_booking(booking_id, item.into_inner())
+            .await
+            .map_err(|_| std::io::Error::new(ErrorKind::Other, "Unable update whole booking."))?,
+    ))
+}
+
 #[patch("/<booking_id>")]
 async fn complete_booking(
     booking_id: String,
     db: &State<DbInstance>,
 ) -> Result<Json<Booking>, std::io::Error> {
-    let booking = db.search_booking(booking_id.clone()).await.map_err(|_| {
-        std::io::Error::new(
-            ErrorKind::Other,
-            format!("Unable get booking: {}", &booking_id),
-        )
-    })?;
+    let mut item = CheckItem::default();
+    item.completed = true;
     Ok(Json(
-        db.update_booking(
-            booking_id,
-            Booking {
-                subject: booking.subject,
-                completed: true,
-                notified: false,
-                user_id: booking.user_id,
-                booking_at: booking.booking_at,
-            },
-        )
-        .await
-        .map_err(|_| std::io::Error::new(ErrorKind::Other, "Unable complete booking."))?,
+        db.partial_update_booking(booking_id, item)
+            .await
+            .map_err(|_| std::io::Error::new(ErrorKind::Other, "Unable complete booking."))?,
     ))
 }
 
@@ -87,25 +87,12 @@ async fn notify(
     booking_id: String,
     db: &State<DbInstance>,
 ) -> Result<Json<Booking>, std::io::Error> {
-    let booking = db.search_booking(booking_id.clone()).await.map_err(|_| {
-        std::io::Error::new(
-            ErrorKind::Other,
-            format!("Unable get booking: {}", &booking_id),
-        )
-    })?;
+    let mut item = CheckItem::default();
+    item.notified = true;
     Ok(Json(
-        db.update_booking(
-            booking_id,
-            Booking {
-                subject: booking.subject,
-                completed: booking.completed,
-                notified: true,
-                user_id: booking.user_id,
-                booking_at: booking.booking_at,
-            },
-        )
-        .await
-        .map_err(|_| std::io::Error::new(ErrorKind::Other, "Unable notify."))?,
+        db.partial_update_booking(booking_id, item)
+            .await
+            .map_err(|_| std::io::Error::new(ErrorKind::Other, "Unable notify."))?,
     ))
 }
 
@@ -139,7 +126,7 @@ async fn get_user(user_id: String, db: &State<DbInstance>) -> Result<Json<User>,
     })?))
 }
 
-#[patch("/<user_id>", data = "<user>")]
+#[put("/<user_id>", data = "<user>")]
 async fn update_user(
     user_id: String,
     user: Json<User>,
@@ -175,6 +162,7 @@ async fn rocket() -> _ {
                 get_all_bookings,
                 create_booking,
                 get_booking,
+                update_booking,
                 complete_booking,
                 cancel_booking,
                 notify,
@@ -186,91 +174,4 @@ async fn rocket() -> _ {
         )
         .attach(CORS)
         .attach(DbMiddleware)
-}
-
-#[cfg(test)]
-mod test {
-    use super::data::User;
-    use super::middleware::AffectedRows;
-    use super::rocket;
-
-    use super::{
-        rocket_uri_macro_create_user, rocket_uri_macro_delete_user, rocket_uri_macro_get_user,
-        rocket_uri_macro_update_user,
-    };
-    use async_once::AsyncOnce;
-    use lazy_static::lazy_static;
-    use rocket::http::Status;
-    use rocket::local::asynchronous::Client;
-
-    lazy_static! {
-        static ref CLIENT: AsyncOnce<Client> = AsyncOnce::new(async {
-            Client::tracked(rocket().await)
-                .await
-                .expect("valid rocket instance")
-        });
-    }
-
-    #[rocket::async_test]
-    async fn test_user_lifecycle() {
-        // create_user
-        let mut user = User {
-            name: "test".to_string(),
-            email: "abc@gmail.com".to_string(),
-            password: "123".to_string(),
-        };
-        let mut response = CLIENT
-            .get()
-            .await
-            .post(uri!("/user", create_user()))
-            .json(&user)
-            .dispatch()
-            .await;
-        assert_eq!(response.status(), Status::Ok);
-        let id = response.into_string().await.unwrap().replace("\"", "");
-        println!("user_id: {}", &id);
-
-        // get_user
-        response = CLIENT
-            .get()
-            .await
-            .get(uri!("/user", get_user(&id.to_string())))
-            .dispatch()
-            .await;
-        assert_eq!(response.status(), Status::Ok);
-        let mut result = response.into_json::<User>().await.unwrap();
-        assert_eq!(result.name, user.name);
-        assert_eq!(result.email, user.email);
-        assert_eq!(result.password, user.password);
-
-        // update_user
-        user.name = "West".to_string();
-        response = CLIENT
-            .get()
-            .await
-            .patch(uri!("/user", update_user(&id.to_string())))
-            .json(&user)
-            .dispatch()
-            .await;
-        assert_eq!(response.status(), Status::Ok);
-        result = response.into_json::<User>().await.unwrap();
-        assert_eq!(result.name, "West");
-
-        // delete_user
-        response = CLIENT
-            .get()
-            .await
-            .delete(uri!("/user", delete_user(&id.to_string())))
-            .dispatch()
-            .await;
-        assert_eq!(response.status(), Status::Ok);
-        assert_eq!(
-            response
-                .into_json::<AffectedRows>()
-                .await
-                .unwrap()
-                .rows_affected,
-            1
-        );
-    }
 }

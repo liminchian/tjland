@@ -1,6 +1,6 @@
-// from: https://www.workfall.com/learning/blog/use-surrealdb-to-persist-data-with-rocket-rest-api/
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use rocket::{
     fairing::{Fairing, Info, Kind, Result},
     Build, Rocket,
@@ -13,8 +13,9 @@ use surrealdb::{
     Surreal,
 };
 
-use crate::data::{Booking, BookingTable, User, UserTable, UtcDateTime};
+use crate::data::{Booking, BookingTable, CheckItem, User, UserTable};
 
+// from: https://www.workfall.com/learning/blog/use-surrealdb-to-persist-data-with-rocket-rest-api/
 pub struct DbMiddleware;
 
 #[rocket::async_trait]
@@ -40,13 +41,22 @@ impl Fairing for DbMiddleware {
 }
 
 #[derive(Deserialize)]
-#[serde(crate = "rocket::serde")]
 struct DbConfig {
     namespace: String,
     database: String,
 }
 
 pub struct DbInstance(Arc<Surreal<Client>>);
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Record {
+    id: Thing,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct AffectedRows {
+    pub rows_affected: usize,
+}
 
 impl DbInstance {
     pub async fn new(
@@ -64,10 +74,17 @@ impl DbInstance {
         Ok(DbInstance(Arc::new(db)))
     }
 
-    pub async fn init_table(&self) -> Result<(), crate::error::Error> {
+    async fn init_table(&self) -> Result<(), crate::error::Error> {
         self.0.query("DEFINE TABLE booking;").await?;
         self.0.query("DEFINE TABLE user;").await?;
         Ok(())
+    }
+
+    fn format_id<'a>(id: &'a str, tb: &'a str) -> &'a str {
+        match id.strip_prefix(format!("{}:", tb).as_str()) {
+            Some(i) => i,
+            None => id,
+        }
     }
 }
 
@@ -94,24 +111,19 @@ impl UserTable for DbInstance {
     }
 
     async fn delete_user(&self, id: String) -> Result<AffectedRows, crate::error::Error> {
-        let _: User = self.0.delete(("user", id.as_str())).await?;
-        let deleted = self
-            .0
-            .query("DELETE booking WHERE user_id = $user_id RETURN BEFORE;")
-            .bind(("user_id", id))
-            .await?
-            .take::<Vec<Booking>>(0)?;
-        Ok(AffectedRows {
-            rows_affected: 1 + deleted.len(),
-        })
+        let uid = Self::format_id(&id, "user");
+        let _: User = self.0.delete(("user", uid)).await?;
+        Ok(AffectedRows { rows_affected: 1 })
     }
 
     async fn update_user(&self, id: String, user: User) -> Result<User, crate::error::Error> {
-        Ok(self.0.update(("user", id.as_str())).content(user).await?)
+        let uid = Self::format_id(&id, "user");
+        Ok(self.0.update(("user", uid)).content(user).await?)
     }
 
     async fn search_user(&self, id: String) -> Result<User, crate::error::Error> {
-        Ok(self.0.select(("user", id.as_str())).await?)
+        let uid = Self::format_id(&id, "user");
+        Ok(self.0.select(("user", uid)).await?)
     }
 }
 
@@ -119,20 +131,14 @@ impl UserTable for DbInstance {
 impl BookingTable for DbInstance {
     async fn create_booking(
         &self,
-        subject: String,
-        booking_at: UtcDateTime,
+        content: String,
+        booking_at: DateTime<Utc>,
         user_id: String,
     ) -> Result<String, crate::error::Error> {
         let record: Record = self
             .0
             .create("booking")
-            .content(Booking {
-                subject,
-                booking_at,
-                user_id,
-                completed: false,
-                notified: false,
-            })
+            .content(Booking::new(content, user_id, booking_at))
             .await?;
         let id = record.id.id.to_string();
 
@@ -140,39 +146,41 @@ impl BookingTable for DbInstance {
     }
 
     async fn delete_booking(&self, id: String) -> Result<AffectedRows, crate::error::Error> {
-        let _ = self.0.delete(("booking", id.as_str())).await?;
-        Ok(AffectedRows { rows_affected: 1 })
+        let bid = Self::format_id(&id, "booking");
+        let deleted: Option<Booking> = self.0.delete(("booking", bid)).await?;
+        match deleted {
+            Some(booking) => {
+                dbg!(booking);
+                Ok(AffectedRows { rows_affected: 1 })
+            }
+            None => Ok(AffectedRows { rows_affected: 0 }),
+        }
     }
 
     async fn update_booking(
         &self,
-        id: String,
+        booking_id: String,
         booking: Booking,
     ) -> Result<Booking, crate::error::Error> {
-        let updated: Booking = self
-            .0
-            .update(("booking", id.as_str()))
-            .content(booking)
-            .await?;
-        Ok(updated)
+        let bid = Self::format_id(&booking_id, "booking");
+        Ok(self.0.update(("booking", bid)).content(booking).await?)
     }
 
     async fn search_booking(&self, id: String) -> Result<Booking, crate::error::Error> {
-        Ok(self.0.select(("booking", id.as_str())).await?)
+        let bid = Self::format_id(&id, "booking");
+        Ok(self.0.select(("booking", bid)).await?)
     }
 
     async fn search_all_bookings(&self) -> Result<Vec<Booking>, crate::error::Error> {
-        let result: Vec<Booking> = self.0.select("booking").await?;
-        Ok(result)
+        Ok(self.0.select("booking").await?)
     }
-}
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Record {
-    id: Thing,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AffectedRows {
-    pub rows_affected: usize,
+    async fn partial_update_booking(
+        &self,
+        booking_id: String,
+        modified: CheckItem,
+    ) -> Result<Booking, crate::error::Error> {
+        let bid = Self::format_id(&booking_id, "booking");
+        Ok(self.0.update(("booking", bid)).merge(modified).await?)
+    }
 }
